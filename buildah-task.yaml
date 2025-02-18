@@ -55,14 +55,19 @@ spec:
     - image: $(params.BUILDER_IMAGE)
       name: build-and-push
       script: |
-        # Ensure BUILD_EXTRA_ARGS and PUSH_EXTRA_ARGS are passed as single arguments if they are provided
+        # Start the build process with buildah bud
         buildah --storage-driver=$(params.STORAGE_DRIVER) bud \
-          $(if [ ! -z "$(params.BUILD_EXTRA_ARGS)" ]; then echo "$(params.BUILD_EXTRA_ARGS)"; fi) --format=$(params.FORMAT) \
+          $(params.BUILD_EXTRA_ARGS) --format=$(params.FORMAT) \
           --tls-verify=$(params.TLSVERIFY) --no-cache \
           -f $(params.DOCKERFILE) -t $(params.IMAGE) $(params.CONTEXT)
 
-        [[ "$(params.SKIP_PUSH)" == "true" ]] && echo "Push skipped" && exit 0
+        # Skip pushing if required
+        if [[ "$(params.SKIP_PUSH)" == "true" ]]; then
+          echo "Push skipped"
+          exit 0
+        fi
 
+        # Handle Docker configuration
         if [[ "$(workspaces.dockerconfig.bound)" == "true" ]]; then
           if test -f "$(workspaces.dockerconfig.path)/config.json"; then
             export DOCKER_CONFIG="$(workspaces.dockerconfig.path)"
@@ -70,16 +75,18 @@ spec:
             cp "$(workspaces.dockerconfig.path)/.dockerconfigjson" "$HOME/.docker/config.json"
             export DOCKER_CONFIG="$HOME/.docker"
           else
-            echo "neither 'config.json' nor '.dockerconfigjson' found at workspace root"
+            echo "Neither 'config.json' nor '.dockerconfigjson' found at workspace root"
             exit 1
           fi
         fi
 
+        # Push the image with buildah push
         buildah --storage-driver=$(params.STORAGE_DRIVER) push \
-          $(if [ ! -z "$(params.PUSH_EXTRA_ARGS)" ]; then echo "$(params.PUSH_EXTRA_ARGS)"; fi) --tls-verify=$(params.TLSVERIFY) \
+          $(params.PUSH_EXTRA_ARGS) --tls-verify=$(params.TLSVERIFY) \
           --digestfile /tmp/image-digest $(params.IMAGE) \
           docker://$(params.IMAGE)
-        
+
+        # Capture the image digest and URL
         cat /tmp/image-digest | tee $(results.IMAGE_DIGEST.path)
         echo "$(params.IMAGE)" | tee $(results.IMAGE_URL.path)
       securityContext:
